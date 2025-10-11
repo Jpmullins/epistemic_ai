@@ -9,8 +9,6 @@ This repository contains the LaTeX manuscript *Epistemic State Updates in LLM Ag
 - `figures/` – TikZ assets, e.g. `knowledge-update-flow.tex` renders the epistemic update loop diagram.
 - `references.bib` – BibTeX database covering epistemic logic, graded modal logic, and agent benchmarks.
 - `code/` – toy Python modules (`knowledge_base.py`, `pipeline_loop.py`) that demonstrate the knowledge-base API discussed in the text.
-- `structure.json` – JSON outline of the manuscript used by upstream tooling when syncing from the DOCX draft.
-- `AGENTS.md` – authoring guidelines and future repository layout expectations (Python packages, tests, prompts) for expanding this project beyond the manuscript.
 
 Auxiliary build outputs (`main.aux`, `main.log`, etc.) are committed for convenience but can be regenerated at any time.
 
@@ -44,5 +42,3 @@ The compiled paper is written to `main.pdf` in the repository root.
 - **Citations**: append entries to `references.bib` and cite them in the text with `\cite{key}`; rebuild so `bibtex` refreshes the bibliography.
 - **Python examples**: run `python code/pipeline_loop.py` to exercise the illustrative knowledge-base loop described in the manuscript. Extend `code/` as needed for richer demonstrations.
 
-## Future Expansion
-`AGENTS.md` captures the intended evolution of this repository into a broader epistemic-agent toolkit (Python package layout, testing strategy, rendering scripts). Until that migration happens, this LaTeX project remains self-contained; when the codebase grows, mirror new modules under `src/` with accompanying tests per the guidelines.
