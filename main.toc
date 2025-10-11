@@ -1,0 +1,25 @@
+\contentsline {section}{\numberline {1}Introduction}{1}{section.1}%
+\contentsline {section}{\numberline {2}Background: Epistemic Logic and Public Announcements}{4}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Knowledge, Belief, and Possible Worlds}{4}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Public Announcement Logic (PAL) and Knowledge Updates}{5}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Graded and Fuzzy Modal Logics for Uncertainty}{6}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}LLM Agents and Existing Approaches to State Management}{7}{subsection.2.4}%
+\contentsline {section}{\numberline {3}Framework Design: Epistemic Workflows for LLM Agents}{9}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Minimal State Representation as Epistemic Filter}{9}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Belief and Knowledge Update via Announcements}{10}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Guiding Action Selection and Belief Revision}{12}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Example: Tool-using LLM Agent with Epistemic Updates}{14}{subsection.3.4}%
+\contentsline {section}{\numberline {4}Implementation Considerations}{15}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Scalability and Avoiding State Explosion}{15}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Partial Observability and Uncertainty}{16}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Integration with LLM Workflows}{17}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Limits of Introspection and Resource Bounds}{19}{subsection.4.4}%
+\contentsline {section}{\numberline {5}Discussion}{20}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Comparison with Related Approaches}{20}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Benefits and Limitations}{21}{subsection.5.2}%
+\contentsline {paragraph}{Benefits.}{21}{section*.4}%
+\contentsline {paragraph}{Limitations.}{21}{section*.5}%
+\contentsline {subsection}{\numberline {5.3}Open Challenges}{21}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Toward Structured Cognition in LLMs}{22}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}Future Work}{22}{subsection.5.5}%
+\contentsline {section}{\numberline {6}Conclusion}{23}{section.6}%
