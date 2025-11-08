@@ -1,0 +1,78 @@
+\section{Epistemic Alignment Architecture}\label{sec:architecture}
+At the heart of our approach is an Epistemic Alignment Layer that wraps around a standard LLM agent. This layer endows the agent with an explicit, manipulable representation of its knowledge and a process to verify reasoning steps. Figure~\ref{fig:loop} gives a high-level overview of the agent's decision loop with this layer in place, which we summarize first:
+
+\begin{figure}[t]
+  \centering
+  \input{figures/epistemic-loop}
+  \caption{Reasoning loop for the epistemically aligned agent. The agent observes new input, verifies candidate chain-of-thought (CoT) steps against its current knowledge and norms, updates the epistemic state $\Sigma$ with approved information (modeled as a public announcement), and then acts.}
+  \label{fig:loop}
+\end{figure}
+
+Crucially, the verification step can trigger a revision: if the CoT step is not verified, the agent will rethink or adjust the step before updating $\Sigma$ or taking an external action. We now describe each component of the architecture in detail:
+
+\subsection{Epistemic State $\Sigma$ and Knowledge Initialization}
+We denote the agent's epistemic state as $\Sigma$ (sigma), which is a set of logical formulas representing everything the agent currently knows or takes to be true. Initially, $\Sigma$ is constructed from the task prompt and any prior context. For example, if the user asks a question with some background, those facts are included in $\Sigma$. Domain assumptions or common knowledge can also be seeded here (though one must be careful, if the agent is allowed to assume all of human common sense, $\Sigma$ could be very large. In practice we include only key facts or explicitly provided knowledge, and rely on the LLM's latent knowledge for trivial commonsense, checking as needed).
+
+Formally, $\Sigma$ might be represented in a suitable logical language. A convenient choice is first-order logic (FOL) for expressiveness. Each atomic fact from the environment (e.g., "Alice is Bob's mother") can be a predicate $Mother(Alice, Bob)$ in $\Sigma$. Norms can be represented as universally quantified implications (e.g., "for any person $x$, do not reveal $x$'s home address" could be a formula $\forall x\, \neg \textit{RevealAddress}(x)$ in $\Sigma$. In implementation, we might use a logical knowledge base or a semantic graph; the specific representation can vary as long as it supports entailment checks.
+
+Before the agent begins reasoning on a new problem, $\Sigma$ is initialized with:
+\begin{itemize}
+\item Environment facts: Any information provided by the user or environment (e.g., a context paragraph for a QA task, or the current state of a game world).
+\item Persistent agent knowledge: This could include previously learned facts (for a long-lived agent across sessions) or domain knowledge. In a stateless question-answering scenario, this may be empty or minimal.
+\item Norms and constraints: A set of logical formulas encoding what the agent should or should not do. These act like axioms, they are intended to remain true throughout and the agent should never knowingly violate them.
+\end{itemize}
+
+By treating norms as part of $\Sigma$, we ensure any potential violation would appear as an inconsistency (contradiction) when combined with a violating action. For instance, if $\Sigma$ contains $\forall x\, \neg \textit{RevealAddress}(x)$ and the agent's thought is "I will reveal Alice's address," that thought can be translated to $\textit{RevealAddress}(Alice)$ which clearly conflicts with the axiom (making $\Sigma \cup \{\textit{RevealAddress}(Alice)\}$ unsatisfiable). This mechanism will be caught by the verification gate (Section~\ref{sec:verification}).
+
+\subsection{Public Announcement Updates in Reasoning}
+As the agent reasons, it generates intermediate conclusions or sub-answers. In our framework, each time the agent is about to accept a new piece of information as true, we model it as a PAL-style update: $\Sigma := \Sigma \land \varphi$, where $\varphi$ is the new formula (announcement). This is conceptually the same as the public announcement $[\varphi]!$ in dynamic epistemic logic, except here there is only one agent (the LLM itself) and we assume $\varphi$ is true in the actual world (the agent believes it as truth). The effect is to restrict $\Sigma$ to worlds where $\varphi$ holds, effectively adding $\varphi$ to the knowledge base.
+
+For example, suppose the agent has $\Sigma$ containing "If A is B's parent, then A is older than B," and during reasoning it deduces "Alice is older than Bob." Before adding this as knowledge, the agent should verify it. Assuming it checks out (Alice is Bob's mother was known, so by the rule, yes Alice is older), the agent performs a public announcement update with $\varphi = Older(Alice, Bob)$. Any subsequent reasoning will then include $Older(Alice, Bob)$ as a known fact. If, later in the dialogue, the user provides new information that Bob is actually older than Alice, adding that would conflict with $Older(Alice, Bob)$ already in $\Sigma$; our system would catch this conflict and could either reject the new info or flag the inconsistency (depending on design, see Section~\ref{sec:discussion} on limitations).
+
+It is important to note that not every step of the LLM's chain-of-thought should necessarily become a public announcement. Sometimes the model might consider a hypothetical or an uncertain guess. We allow the agent to distinguish between tentative assumptions and solid conclusions:
+\begin{itemize}
+\item Tentative assumption: can be phrased as such and not immediately added to $\Sigma$ as truth. We might handle this by introducing it with a special marker (e.g., "Suppose $\varphi$ for sake of argument..."). The verification gate can then treat it differently, perhaps checking consistency of the assumption but not requiring it to be entailed by $\Sigma$.
+\item Solid conclusion: if the agent is confident it is true, it would be added to $\Sigma$.
+\end{itemize}
+
+In practice, to keep things simple, our implementation currently treats each CoT step that the model asserts as a fact as an addition to $\Sigma$ (after verification). If the model wishes to consider a hypothesis, we expect it to explicitly say so (and we could model that with a different operation, like a tagged formula in $\Sigma$ or a branch in reasoning). Managing multiple possible worlds or branches is beyond the scope of this work, but Section~\ref{sec:discussion} touches on this as a future direction (related to non-monotonic reasoning and exploring what-if scenarios).
+
+\subsection{LLM-as-Judge and Norm Adherence}
+While a logical solver provides the backbone for verification, we incorporate the LLM itself as a judge in two ways:
+\begin{enumerate}
+\item Norm interpretation: Norms provided in natural language (e.g., a policy document or user instructions like "avoid hateful language") may require interpretation. We utilize the LLM to translate such NL descriptions into formal constraints. For instance, the prompt to the LLM-as-judge might be: "Translate the following guideline into a logical condition the agent must satisfy: 'The assistant should not reveal personal identifiable information (PII).'" The LLM might respond with something like a logical template $\neg \textit{Reveal}(x)$ if $x$ is PII. A developer or a higher-level system could confirm and refine this formalization. The resulting formula(s) go into $\Sigma$. Essentially, the LLM helps bootstrap the formal knowledge of norms.
+\item Contextual judgment: Some situations are too fuzzy for hard logic. For example, determining if a certain statement constitutes "hateful language" might be non-trivial to formalize with simple logical rules, it might require semantic understanding and context. In such cases, we can ask the LLM-as-judge (potentially a separate instance or prompt of the model) to evaluate whether a candidate output violates the spirit of a norm. This is akin to a natural language inference or classification task for the model. If the LLM-as-judge says "Yes, this seems violative because ...," we can treat that as a signal to reject or modify the output.
+\end{enumerate}
+
+We emphasize that the LLM-as-judge is used when formal logic alone does not suffice. Whenever a norm can be concretely encoded (like "never output a 5-digit number as it might be a zip code", a contrived example), a direct logical constraint is preferred because it is unambiguous and checkable by the solver. The LLM judge is a fallback for nuanced content evaluation.
+
+Figure~\ref{fig:charity} illustrates a "norm pipeline," using an example scenario where the agent has a norm about charitable behavior.
+
+\begin{figure}[t]
+  \centering
+  \input{figures/charity-pipeline}
+  \caption{Norm interpretation pipeline. Natural-language policies are formalized, interpreted charitably, and reviewed by the LLM-as-judge before new norm commitments are added to $\Sigma$.}
+  \label{fig:charity}
+\end{figure}
+
+The LLM-as-judge concept is implemented as a special prompting of the same base model (or a smaller model) that is kept separate from the main reasoning chain. It has access to the norm descriptions and possibly the dialogue or state context, but it is prompted to output only a judgment (and rationale if needed). This is similar to a constitutional AI "critique" stage, but here it is integrated with our logical layer. The final arbiter on many checks is still the symbolic solver, e.g., the solver will catch a direct logical contradiction or norm violation. The LLM judge helps where human value judgments are involved.
+
+\subsection{Verification Loop Integration}
+With $\Sigma$ and the LLM-as-judge in place, the agent's control flow can be summarized as:
+\begin{enumerate}
+\item Observation: Get input or perceive environment. Incorporate new facts into $\Sigma$ (after trivial verification if needed). For user-provided info, we generally trust it unless it directly conflicts with $\Sigma$ (handling of conflicting inputs can follow a policy: e.g., user input might override prior knowledge, or the agent might ask for clarification).
+\item Proposal: The LLM generates the next step of chain-of-thought (CoT). This could be a sub-answer, an action, or an intermediate deduction.
+\item Verification (logic): The proposition(s) in the CoT step are extracted and sent to the verification gate. Here the solver checks consistency: $\Sigma \land \varphi$ (where $\varphi$ represents all new assertions in the step) is tested for satisfiability, and optionally $\Sigma \models \varphi$ is tested for entailment (to judge groundedness).
+\item Verification (norms): In parallel, or as part of the consistency check, any formula in $\varphi$ that corresponds to a potential action is checked against norm constraints. If the norms are in $\Sigma$, this is inherently a consistency check. If using the LLM-as-judge for nuance, we call it here.
+\item Outcomes:
+  \begin{itemize}
+  \item If pass (no issues): the step is approved. We update $\Sigma := \Sigma \land \varphi$ (public announcement update) and allow the CoT to continue.
+  \item If contradiction: the solver finds $\Sigma \land \varphi$ unsatisfiable, meaning $\varphi$ directly conflicts with something known or an active norm. The agent must revise or abandon $\varphi$. We prompt the LLM (possibly with feedback) to rethink the step. For example: "The last step, '$\varphi$', contradicts what is known or allowed. Please reconsider." The CoT is thereby adjusted (the agent might retract that step or change it).
+  \item If ungrounded: $\Sigma \land \varphi$ is consistent but $\Sigma \not\models \varphi$ (i.e., $\varphi$ was not entailed and thus appears to be an assumption or leap). Here the agent is allowed some flexibility. We might either: (a) ask the agent to provide justification ("Explain how $\varphi$ can be derived or provide evidence"), or (b) mark $\varphi$ as an assumption. Depending on context, the agent could continue with $\varphi$ as a new assumption in $\Sigma$ but with a flag that it is unverified. In critical applications, we lean towards option (a), requiring the agent to justify $\varphi$ using known facts (which effectively turns the situation into either entailed or contradicted eventually). Ungrounded steps are where an LLM might hallucinate a fact; catching them prompts the agent either to cite a source or to realize it does not actually know that. This loop resembles the self-reflection proposed by \citet{madaan2023selfrefine} and others, but here triggered by a formal check rather than a heuristic.
+  \end{itemize}
+\item Action/Output: Once the chain-of-thought yields a final answer or action that is verified, the agent executes that action or outputs the answer. If it is a continuous task, the loop then awaits the next observation and repeats.
+\end{enumerate}
+
+This architecture effectively creates a closed-loop system where the LLM's creative generative ability is checked by an unyielding logical standard at each step. The design ensures the LLM is not overly constrained in how it reasons (it can still generate hypotheses, perform reasoning steps in natural language, etc.), but it is constrained in what it can commit to as true or act upon. Only thoughts that pass the epistemic alignment criteria make it into the agent's knowledge state or are used for actions.
+
+The overhead of this process is the extra computation for verification and the possibility of multiple iterations if the LLM initially proposes a flawed step. Our implementation experiences, discussed next, show that with careful engineering, the cost can be kept reasonable and the benefits (averting incorrect or unsafe reasoning) are significant.

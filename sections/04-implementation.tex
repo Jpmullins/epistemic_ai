@@ -1,0 +1,51 @@
+\section{Implementation Details}\label{sec:implementation}
+We implemented the epistemic alignment layer in a prototype system using Python, combining an LLM (OpenAI GPT-4 API in our experiments) with a logic backend (the Z3 SMT solver for first-order logic consistency checks, and a Prolog engine for simple rule-based reasoning). Here we describe notable aspects of the implementation, including how we represent the knowledge base, how we interface with the LLM for both generation and judgment, and optimizations for efficiency.
+
+\subsection{Knowledge Base Representation and Operations}
+The epistemic state $\Sigma$ is represented as a collection of logical assertions. We chose a subset of first-order logic that balances expressiveness with decidability, essentially, relational logic with functions and equality, but no higher-order quantification (to avoid undecidability issues). Each assertion is stored as either:
+\begin{itemize}
+\item A ground fact (predicate with concrete entities, e.g. $\texttt{Older(Alice,Bob)}$).
+\item A rule (Horn-clause style implication or constraint, e.g. $\texttt{Parent}(x,y) \to \texttt{Older}(x,y)$).
+\item A norm (which in implementation is just a rule or fact that encodes a prohibition or requirement, e.g. $\texttt{Forbidden}(a)$ for some action $a$).
+\end{itemize}
+
+We developed a simple class \texttt{EpistemicState} with methods:
+\begin{itemize}
+\item \texttt{assert\_fact(formula)}: add a new formula to $\Sigma$ (after verification).
+\item \texttt{retract(formula)}: remove a formula (used rarely, e.g., if an assumption is later proven false or in some debugging cases).
+\item \texttt{check\_consistency(candidate\_formulas)}: call the Z3 solver to check if $\Sigma \land \text{(candidate formulas)}$ is satisfiable (detects contradictions).
+\item \texttt{check\_entailment(candidate\_formula)}: check if $\Sigma \models \text{candidate}$ by asking if $\Sigma \land \neg \text{(candidate)}$ is unsatisfiable (standard refutation).
+\end{itemize}
+
+For named entities and predicates, our implementation maintains a symbol table. In many cases, the LLM's outputs are in natural language, so an intermediate step does autoformalization: we crafted prompts that encourage the LLM to output new information in a structured way that can be easily parsed into logical form. For example, if the LLM concludes "Alice is older than Bob", we have it output a tag like \texttt{ASSERT Older(Alice,Bob)} which our code can parse and feed into \texttt{assert\_fact} after verification. This was inspired by the approach of \citet{feng2025vericot}, who had the model annotate each CoT step with a logical translation. We found that by few-shot prompting, GPT-4 could reliably produce statements like \texttt{ASSERT Predicate(arg1, arg2)} for facts, or \texttt{QUERY X} for questions to the solver, etc. These tokens (\texttt{ASSERT}, \texttt{QUERY}) are artificial, purely to facilitate machine parsing.
+
+\paragraph{Exporting to Prompt:} The function \texttt{export\_prompt()} in our code assembles the LLM's prompt at each iteration. It includes:
+\begin{itemize}
+\item A summary of relevant facts from $\Sigma$. We cannot list all of $\Sigma$ if it grows large, so we employ a relevance filter: given the current goal or question, we select those formulas from $\Sigma$ that have symbols (predicates or constants) overlapping with the goal or the current step's content. This is akin to pulling a support set for the query. For example, if the agent is currently reasoning about ages of Alice and Bob, we include facts like \texttt{Parent(Alice,Bob)} or \texttt{Older(Alice,Charlie)} but omit unrelated facts about other domains. We also always include norm statements in the prompt (since they are few and high-level).
+\item An instruction to the LLM to think step-by-step and to formalize any new claims. Essentially: "You are an agent with certain known facts and rules (listed below). You must ensure your reasoning is logically consistent with these and obey the given norms. When you deduce a new fact, state it with an \texttt{ASSERT} tag. If you reach a conclusion or answer, use \texttt{ANSWER} tag. If you find a contradiction or need to check something, you may use \texttt{QUERY}." 
+\end{itemize}
+
+The \texttt{QUERY} functionality was added to allow the LLM to explicitly ask the solver via the prompt if uncertain. For instance, the model might output \texttt{QUERY Is there any person who is older than themselves?} as a way to use logic. In our pipeline, when the LLM produces a \texttt{QUERY}, we intercept it and answer it using $\Sigma$ (the Prolog engine can answer simple queries, or we fallback to Z3 for more complex queries). Then we feed the answer back into the LLM's context. This effectively gives the LLM a way to ask logical sub-questions ("Does X imply Y given what I know?") and get a definitive answer.
+
+\paragraph{Selective Verification:} Not every token or phrase from the LLM needs heavy verification. We apply the verification gate primarily to asserted new facts or actions. This keeps the loop efficient. For example, if the LLM's CoT says: "I recall Alice is Bob's parent. By the rule, that means Alice is older than Bob. Thus, I deduce \texttt{Older(Alice,Bob)}. Next, I will ...", we identify \texttt{Older(Alice,Bob)} as the asserted new fact, verify it, and if consistent, add it to $\Sigma$. The intermediate statements like recalling parenthood are just references to already known facts (we check that "Alice is Bob's parent" was indeed in $\Sigma$, but that's a quick lookup, not a solver call).
+
+We also skip verification for clearly hypothetical or counterfactual statements that the LLM sometimes uses (e.g., "If Alice were not Bob's parent, then ...”). We do this by simple keyword heuristics ("if ... were” indicates a hypothetical). A more robust approach would be to have a mode where the agent explicitly marks some reasoning as hypothetical. Due to time constraints, our prototype uses the heuristic approach and it sufficed in our tests.
+
+\paragraph{Resource Handling:} Running a solver at each step can be expensive, especially as $\Sigma$ grows. We mitigated this by:
+\begin{itemize}
+\item Caching solver queries: We memoize results of \texttt{check\_consistency} and \texttt{check\_entailment} for specific inputs. Often, the agent might revisit a similar check, so caching saves time.
+\item Timeouts on solver: We set a timeout of 2 seconds on Z3 queries. In our benchmark problems (which are mostly small puzzles or short dialogues), the queries usually resolve in milliseconds. The timeout is a safety net to avoid hanging on a complex formula.
+\item Limiting $\Sigma$ size via forgetting: If $\Sigma$ becomes very large (over 100 assertions in our setup, which didn't happen often), we employ a simple "forgetting" strategy: we drop some less relevant facts (determined by usage frequency in past reasoning steps). This is admittedly ad-hoc; a smarter approach would use an LTU (least used) cache or compress older facts into summary statements. However, because most of our test scenarios are bounded in length, $\Sigma$ rarely exceeded 40 facts/rules, so we did not implement an elaborate memory management scheme.
+\end{itemize}
+
+The interplay between Python (for logic) and the LLM (for language) is orchestrated by a loop that alternates between calling the LLM with a prompt and then performing checks/updates based on the LLM's output. Each iteration typically involves:
+\begin{itemize}
+\item Parsing the LLM output.
+\item If it contains \texttt{ASSERT} $\varphi$: call verification on $\varphi$. If passes, add to $\Sigma$. If fails, possibly modify the prompt to inform the LLM and loop again.
+\item If it contains \texttt{ANSWER} (final answer): verify that the final answer is consistent with $\Sigma$ (if the answer is a factual claim) and then present it as output.
+\item If it contains \texttt{QUERY}: run the query on $\Sigma$ and append the answer to the LLM's context, then let it continue reasoning.
+\end{itemize}
+
+This tight integration required careful prompt management to ensure the LLM remained on track. We found it helpful to include in the system prompt a short "epistemic guidelines" paragraph reminding the model: "Your goal is to maintain a consistent knowledge state. Do not assume facts without proof or explicit assumption. If unsure, ask via QUERY. Adhere to all provided norms strictly." This reduced the frequency of the model hallucinating unsupported facts.
+
+In summary, the implementation combines a conventional programming approach for logical operations with prompt engineering to harness the LLM's strengths. The LLM handles the creative and semantic-heavy tasks (like interpreting norms, deciding which rule to apply, formulating the next thought), while the logic module handles bookkeeping and formal verification. The result is a synergistic system where each side (neural and symbolic) compensates for the other's weaknesses: the neural side provides understanding and flexible reasoning, and the symbolic side provides rigor and adherence to constraints.

@@ -1,0 +1,57 @@
+\section{Verification Gate Formalization}\label{sec:verification}
+In this section, we define the operation of the verification gate, which serves as the alignment filter for the chain-of-thought. At a high level, the verification gate performs a logical entailment and consistency check on each proposed inference. We denote the agent’s epistemic state at step $t$ as $\Sigma_t$. When the agent proposes a new statement (or set of statements) $\Delta$ (e.g., an intermediate conclusion or an action description), the gate computes an outcome based on $\Sigma_t$ and $\Delta$:
+\begin{itemize}
+\item Contradiction: if $\Sigma_t \land \Delta$ is unsatisfiable (inconsistent), or equivalently $\Sigma_t \models \neg(\bigwedge \Delta)$.
+\item Entailment (triviality): if $\Sigma_t \models (\bigwedge \Delta)$, i.e., $\Delta$ is logically entailed by what the agent already knows.
+\item Consistent but not entailed: if $\Sigma_t \land \Delta$ is satisfiable, yet $\Sigma_t \not\models (\bigwedge \Delta)$.
+\end{itemize}
+
+Formally, let $\Theta(\Sigma_t, \Delta)$ be a function that returns the outcome category:
+\[ 
+\Theta(\Sigma_t, \Delta) = 
+\begin{cases}
+\textsc{Contradiction} & \text{if } \Sigma_t \land \Delta \text{ is unsatisfiable},\\
+\textsc{Entailed} & \text{if } \Sigma_t \models (\bigwedge \Delta),\\
+\textsc{NewInfo} & \text{if } \Sigma_t \land \Delta \text{ is satisfiable and } \Sigma_t \not\models (\bigwedge \Delta).
+\end{cases}
+\]
+Here, \textsc{NewInfo} (new information) covers anything that is consistent and not already implied. Within \textsc{NewInfo}, we further distinguish:
+\begin{itemize}
+\item \textsc{GroundedNew}: $\Delta$ is consistent and the agent has provided some evidence or reasoning from $\Sigma_t$ that implies $\Delta$. This might be the case if the agent explicitly cited a rule or fact leading to $\Delta$. In practice, this is hard to automatically decide; it overlaps with the “Entailed” category because if the evidence was valid, $\Delta$ should actually become entailed. Thus, we usually treat anything not formally entailed as potentially ungrounded.
+\item \textsc{Ungrounded}: $\Delta$ is consistent but the agent has not supported it. This often manifests as the agent stating a fact out of nowhere. E.g., if $\Sigma_t$ has no mention of “Charlie”, and $\Delta$ is “Charlie is 5 years old”, this is unsupported (and likely false unless an assumption).
+\end{itemize}
+
+The verification gate uses an automated theorem prover or satisfiability solver to evaluate these conditions. In our implementation, as described, we use a SAT/SMT solver for consistency and entailment checks. These correspond to the standard decision problems in logic:
+\begin{itemize}
+\item Consistency check: does $\Sigma_t \land \Delta$ have a model?
+\item Entailment check: does every model of $\Sigma_t$ satisfy $\Delta$?
+\end{itemize}
+
+If norms are present, they are part of $\Sigma_t$. Thus, any action $a$ that violates a norm will cause $\Sigma_t \land \{a\}$ to be unsatisfiable (since $\Sigma_t$ contains $\neg a$ or something equivalent). For example, if a norm is "not $a$" in $\Sigma_t$, then obviously $\Sigma_t \land \{a\}$ is inconsistent. This is why we prefer to encode norms as formulas in $\Sigma_t$, it reduces norm compliance to the same satisfiability check.
+
+Figure~\ref{fig:gate} depicts a schematic of the verification gate’s logic with three possible outcomes.
+
+\begin{figure}[t]
+  \centering
+  \input{figures/verification-gate}
+  \caption{Verification gate routing. Each chain-of-thought step is tested for contradiction, entailment, or lack of grounding before the agent continues reasoning.}
+  \label{fig:gate}
+\end{figure}
+
+The formal definitions above assume a classical logic setting. One subtlety in practice is that our $\Sigma_t$ is always evolving; we treat each new $\Delta$ that passes as an announcement, so $\Sigma_{t+1} = \Sigma_t \cup \Delta$ (assuming $\Delta$ is a set of formulas or a single formula understood as a set of one). Over time, $\Sigma$ grows monotonically (we do not withdraw knowledge, except in the special case of finding a contradiction and backtracking, which we discuss below). Monotonic growth means once something is added, it stays added. This is mostly fine in a world of truthful reasoning. However, if the agent made a mistake and added an incorrect fact, we might need to retract it later. Our system is capable of such retraction (we keep a proof tree of how a fact was derived, and if it later is shown false, we can retract it and anything that depended on it). But such situations did not arise often because the verification gate is supposed to prevent false facts from ever being added. In essence, we aim for $\Sigma_t$ to always be a sound knowledge base about the world (plus assumptions explicitly labeled).
+
+Contradiction handling: when $\Theta(\Sigma_t, \Delta) = \textsc{Contradiction}$, two scenarios arise. (1) The agent proposed a step that directly conflicts with what it knows (including norms). (2) More subtly, $\Sigma_t$ might itself become inconsistent after a series of additions that individually seemed fine. Our gate checks at each step and catches such inconsistencies.
+
+Ungrounded handling: when $\Delta$ is neither contradicted nor entailed, we label it as provisional knowledge and prompt the agent to justify it or mark it as an assumption.
+
+One can draw a parallel between our ungrounded-case handling and how humans approach assumptions: if you make a guess in solving a puzzle, you mark it and see if it leads to a contradiction; if it does, you revert it. Our system is positioned to do exactly that, since any downstream contradiction will be caught. However, we lean toward avoiding blind assumptions by pushing the agent to either find evidence or drop the guess early.
+
+Complexity: the verification gate’s checks are NP-complete in the worst case (checking SAT or UNSAT). However, the scale of $\Sigma_t$ in our use is small (tens of facts/rules) and the structure is often simple, making it tractable. We also note that entailment in first-order logic is semi-decidable; our use of an SMT solver means we handle a decidable fragment or bounded domain reasoning for safety.
+
+In summary, the verification gate enforces two invariants at each reasoning step:
+\begin{enumerate}
+\item Consistency invariant: $\Sigma_t$ should remain logically consistent (no contradictions among beliefs and norms).
+\item Justification invariant: no new belief is accepted without either being entailed by existing knowledge or being explicitly assumed with awareness.
+\end{enumerate}
+
+These invariants underlie the epistemic alignment we seek: the agent’s beliefs never blatantly contradict themselves or the given norms, and the agent is not freely hallucinating facts. In the next section, we discuss how this formal verification translates into practical benefits like better interpretability and adherence to ethical constraints, as well as the limits of this method.

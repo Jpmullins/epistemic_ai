@@ -1,0 +1,23 @@
+\begin{tikzpicture}[>=Stealth,
+    process/.style={draw, thick, rounded corners, align=center, fill=blue!20, minimum width=3.5cm, minimum height=1cm},
+    decision/.style={draw, thick, fill=blue!20, diamond, aspect=2, inner sep=1pt, minimum width=3cm, minimum height=1.5cm, align=center},
+    outcome/.style={draw, thick, rounded corners, align=center, fill=blue!20, minimum width=1.5cm, minimum height=0.8cm},
+    state/.style={draw, thick, ellipse, align=center, fill=gray!20, minimum width=3.5cm, minimum height=0.8cm}]
+    % Nodes (normative pipeline stages)
+    \node[process] (nlpolicy) {Natural language\\policy};
+    \node[process, right=3cm of nlpolicy] (formal) {Formalization};
+    \node[process, right=3cm of formal] (charity) {Charitable\\interpretation};
+    \node[decision, right=3cm of charity] (judge) {LLM-as-judge};
+    % Outcome nodes for decision
+    \node[outcome, below=1.5cm of judge, xshift=-2cm] (reject) {Reject};
+    \node[outcome, below=1.5cm of judge, xshift=2cm] (commit) {Commit};
+    % Norms input as epistemic commitments
+    \node[state, above=1.5cm of charity] (norms) {Norms\\(epistemic commitments)};
+    % Arrows
+    \draw[->, thick] (nlpolicy) -- (formal);
+    \draw[->, thick] (formal) -- (charity);
+    \draw[->, thick] (charity) -- (judge);
+    \draw[->, thick] (judge) -- (commit);
+    \draw[->, thick] (judge) -- (reject);
+    \draw[->, thick, dashed] (norms.south) -- (charity.north);
+\end{tikzpicture}

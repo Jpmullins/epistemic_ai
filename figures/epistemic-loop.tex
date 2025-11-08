@@ -1,0 +1,26 @@
+\begin{tikzpicture}[node distance=3cm, >=Stealth,
+    process/.style={draw, thick, rounded corners, align=center, fill=blue!20, minimum width=2.5cm, minimum height=1cm},
+    state/.style={draw, thick, ellipse, align=center, fill=gray!20, minimum width=1.2cm, minimum height=0.8cm}]
+    % Nodes (epistemic loop stages)
+    \node[process] (observe) {Observe};
+    \node[process, right=of observe] (parse) {Parse};
+    \node[process, right=of parse] (verify) {Verify};
+    \node[process, right=of verify] (update) {Update (PAL)};
+    \node[process, right=of update] (reason) {Reason};
+    \node[process, right=of reason] (act) {Act};
+    \node[process, right=of act] (feedback) {Feedback};
+    % Knowledge state Sigma
+    \node[state, above=1.2cm of update, xshift=-1cm] (sigma) {$\Sigma$};
+    % Main loop arrows
+    \draw[->, thick] (observe) -- (parse);
+    \draw[->, thick] (parse) -- (verify);
+    \draw[->, thick] (verify) -- (update);
+    \draw[->, thick] (update) -- (reason);
+    \draw[->, thick] (reason) -- (act);
+    \draw[->, thick] (act) -- (feedback);
+    % Feedback loop (arrow from Feedback back to Observe)
+    \draw[->, thick] (feedback.south) .. controls ($(feedback.south)+(0,-2)$) and ($(observe.south)+(0,-2)$) .. (observe.south);
+    % Verification gate connections with state Sigma
+    \draw[->, thick, dashed] (sigma.south) -- (verify.north);
+    \draw[->, thick, dashed] (update.north) -- (sigma.south);
+\end{tikzpicture}

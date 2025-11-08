@@ -1,0 +1,14 @@
+\begin{tikzpicture}[>=Stealth,
+    process/.style={draw, thick, rounded corners, align=center, fill=blue!20, minimum width=4cm, minimum height=1cm},
+    decision/.style={draw, thick, fill=blue!20, diamond, aspect=2, inner sep=1pt, minimum width=3cm, minimum height=1.5cm, align=center}]
+    % Nodes (verification gate and CoT step)
+    \node[process] (cotstep) {Chain-of-thought step};
+    \node[decision, right=4cm of cotstep] (verify_gate) {Verification gate};
+    \node[process, right=4cm of verify_gate] (pass) {Continue reasoning};
+    \node[process, below=2cm of verify_gate] (flag) {Flag step\\(ungrounded)};
+    % Arrows and branch labels
+    \draw[->, thick] (cotstep.east) -- (verify_gate.west);
+    \draw[->, thick] (verify_gate.east) -- node[midway, above] {Entailment} (pass.west);
+    \draw[->, thick] (verify_gate.south) -- node[right] {Ungrounded} (flag.north);
+    \draw[->, thick] (verify_gate) to[out=135, in=90] node[midway, above] {Contradiction} (cotstep.north);
+\end{tikzpicture}
